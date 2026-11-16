@@ -20,9 +20,6 @@ export const metadata: Metadata = {
     "A clean, fast, mobile-friendly Sudoku game built with Next.js. Four difficulty levels, notes, hints, and undo.",
   keywords: ["Sudoku", "puzzle", "game", "Next.js", "TypeScript"],
   authors: [{ name: "Sudoku" }],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
   openGraph: {
     title: "Sudoku — Play Online",
     description: "A clean, fast, mobile-friendly Sudoku game.",
