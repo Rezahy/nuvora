@@ -5,7 +5,7 @@
  */
 
 import type { Board, Difficulty } from "./sudoku";
-import type { CellNotes, GameStatus, HistoryEntry } from "./sudoku-store";
+import type { CellNotes, GameStatus, HistoryEntry } from "@/store/sudoku-store";
 
 const STORAGE_KEY = "sudoku-game-save-v1";
 
@@ -44,7 +44,7 @@ interface SerializedHistoryEntry {
 }
 
 /** The slice of store state needed to serialize. */
-export interface PersistableState {
+export interface PersistAbleState {
   status: GameStatus;
   difficulty: Difficulty;
   puzzle: Board;
@@ -66,7 +66,7 @@ function isBrowser(): boolean {
 }
 
 /** Save the current game to localStorage. Only persists playing/paused games. */
-export function saveGame(state: PersistableState): void {
+export function saveGame(state: PersistAbleState): void {
   if (!isBrowser()) return;
 
   // Don't save finished or idle games.

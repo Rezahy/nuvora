@@ -1,258 +1,558 @@
 /**
- * Sudoku engine — puzzle generation, solving, validation.
- * Pure functions, no React / state.
+ * Zustand store for the Sudoku game.
  */
 
-export type CellValue = number; // 0 = empty, 1-9 = value
-export type Board = CellValue[]; // length 81, row-major (row * 9 + col)
+import { create } from "zustand";
+import {
+  type Board,
+  type Difficulty,
+  generatePuzzle,
+  getHint,
+  isBoardComplete,
+  computeAllConflicts,
+  getCompletedUnitCells,
+  EMPTY_BOARD,
+} from "@/lib/sudoku";
+import {
+  saveGame,
+  loadSavedGame,
+  clearSavedGame,
+  toPreview,
+  type SavedGamePreview,
+} from "@/lib/sudoku-persist";
 
-export type Difficulty = "easy" | "medium" | "hard" | "expert";
+export type CellNotes = Set<number>;
 
-export const DIFFICULTY_CLUES: Record<Difficulty, number> = {
-  easy: 40,
-  medium: 32,
-  hard: 28,
-  expert: 24,
-};
+export type GameStatus = "idle" | "playing" | "paused" | "won" | "lost";
 
-export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
-  easy: "Easy",
-  medium: "Medium",
-  hard: "Hard",
-  expert: "Expert",
-};
+export interface HistoryEntry {
+  index: number;
+  prevValue: number;
+  nextValue: number;
+  prevNotes?: CellNotes;
+  nextNotes?: CellNotes;
+  wasGiven: boolean; // whether the affected cell was previously given (shouldn't happen)
+}
 
-export const EMPTY_BOARD: Board = Array(81).fill(0);
+export interface SudokuState {
+  status: GameStatus;
+  difficulty: Difficulty;
 
-/* ----------------------------- helpers ----------------------------- */
+  // The puzzle as given to the player (immutable — for "isGiven" checks).
+  puzzle: Board;
+  // The fully solved board (for hints & win check).
+  solution: Board;
+  // The current board state (includes user input).
+  board: Board;
+  // Per-cell notes (only meaningful for non-given, empty cells).
+  notes: CellNotes[];
 
-export const idx = (r: number, c: number) => r * 9 + c;
+  // Index of the currently selected cell, or null.
+  selected: number | null;
+  // Whether notes mode is on.
+  notesMode: boolean;
+  // How many hints remain.
+  hintsLeft: number;
+  // How many mistakes the player has made (out of `maxMistakes`).
+  mistakes: number;
+  maxMistakes: number;
+  // Score.
+  score: number;
+  // Elapsed seconds (only counts when status === "playing").
+  elapsedSec: number;
+  // Whether a mistake just happened (for cell-shake animation).
+  lastMistakeIndex: number | null;
+  lastMistakeAt: number; // Date.now() of last mistake
+  // Hint flash — cell that was just filled by a hint.
+  lastHintIndex: number | null;
+  lastHintAt: number;
+  // Completion celebration — cells that just became part of a newly-completed
+  // row / column / 3x3 box. Drives a celebratory animation.
+  completedAnimCells: Set<number>;
+  completedAnimAt: number;
 
-/** Returns array of peer indices (same row, col, or 3x3 box) — excludes self. */
-export function getPeers(index: number): number[] {
+  history: HistoryEntry[];
+
+  // Preview of a saved game (for the Continue button on the home screen).
+  // Populated on mount by loadSavedGame(); cleared when the game ends or is reset.
+  savedGamePreview: SavedGamePreview | null;
+
+  // Actions
+  startGame: (difficulty: Difficulty) => void;
+  selectCell: (index: number | null) => void;
+  toggleNotesMode: () => void;
+  inputNumber: (value: number) => void;
+  erase: () => void;
+  undo: () => void;
+  useHint: () => void;
+  pause: () => void;
+  resume: () => void;
+  tick: () => void;
+  reset: () => void;
+  goHome: () => void;
+  // Load a saved game from localStorage (sets savedGamePreview, does NOT auto-resume).
+  loadSavedGame: () => void;
+  // Restore the full saved game and resume play.
+  resumeSavedGame: () => void;
+}
+
+const MAX_HINTS = 3;
+const MAX_MISTAKES = 3;
+
+function emptyNotes(): CellNotes[] {
+  return Array.from({ length: 81 }, () => new Set<number>());
+}
+
+function cloneNotes(notes: CellNotes[]): CellNotes[] {
+  return notes.map((n) => new Set(n));
+}
+
+/**
+ * Given the board before and after a move, return the set of cells that are
+ * part of a row / column / 3x3 box which became fully-correct as a result of
+ * the move (i.e. was not complete before, is complete now).
+ */
+function newlyCompletedCells(
+  boardBefore: Board,
+  boardAfter: Board,
+  solution: Board,
+): Set<number> {
+  const before = getCompletedUnitCells(boardBefore, solution);
+  const after = getCompletedUnitCells(boardAfter, solution);
+  const result = new Set<number>();
+  for (const i of after) {
+    if (!before.has(i)) result.add(i);
+  }
+  return result;
+}
+
+export const useSudokuStore = create<SudokuState>((set, get) => ({
+  status: "idle",
+  difficulty: "easy",
+  puzzle: [...EMPTY_BOARD],
+  solution: [...EMPTY_BOARD],
+  board: [...EMPTY_BOARD],
+  notes: emptyNotes(),
+  selected: null,
+  notesMode: false,
+  hintsLeft: MAX_HINTS,
+  mistakes: 0,
+  maxMistakes: MAX_MISTAKES,
+  score: 0,
+  elapsedSec: 0,
+  lastMistakeIndex: null,
+  lastMistakeAt: 0,
+  lastHintIndex: null,
+  lastHintAt: 0,
+  completedAnimCells: new Set<number>(),
+  completedAnimAt: 0,
+  history: [],
+  savedGamePreview: null,
+
+  startGame: (difficulty) => {
+    const { puzzle, solution } = generatePuzzle(difficulty);
+    set({
+      status: "playing",
+      difficulty,
+      puzzle,
+      solution,
+      board: [...puzzle],
+      notes: emptyNotes(),
+      selected: null,
+      notesMode: false,
+      hintsLeft: MAX_HINTS,
+      mistakes: 0,
+      maxMistakes: MAX_MISTAKES,
+      score: 0,
+      elapsedSec: 0,
+      lastMistakeIndex: null,
+      lastMistakeAt: 0,
+      lastHintIndex: null,
+      lastHintAt: 0,
+      completedAnimCells: new Set<number>(),
+      completedAnimAt: 0,
+      history: [],
+      savedGamePreview: null,
+    });
+    saveGame(get());
+  },
+
+  selectCell: (index) => {
+    if (get().status !== "playing") return;
+    set({ selected: index });
+  },
+
+  toggleNotesMode: () => {
+    if (get().status !== "playing") return;
+    set((s) => ({ notesMode: !s.notesMode }));
+  },
+
+  inputNumber: (value) => {
+    const state = get();
+    if (state.status !== "playing") return;
+    const sel = state.selected;
+    if (sel === null) return;
+    // Can't edit a given cell.
+    if (state.puzzle[sel] !== 0) return;
+
+    const prevValue = state.board[sel];
+    const prevNotes = state.notes[sel];
+
+    if (state.notesMode) {
+      // Can't add notes to a cell that already has a value.
+      if (state.board[sel] !== 0) return;
+      // Toggle the note.
+      const nextNotes = new Set(prevNotes);
+      if (nextNotes.has(value)) nextNotes.delete(value);
+      else nextNotes.add(value);
+      const newNotes = cloneNotes(state.notes);
+      newNotes[sel] = nextNotes;
+      const history: HistoryEntry[] = [
+        ...state.history,
+        {
+          index: sel,
+          prevValue: 0,
+          nextValue: 0,
+          prevNotes: new Set(prevNotes),
+          nextNotes: new Set(nextNotes),
+          wasGiven: false,
+        },
+      ];
+      set({ notes: newNotes, history });
+      saveGame(get());
+      return;
+    }
+
+    // Normal mode: setting a value.
+    // If the value is the same as current, treat as no-op (or clear).
+    if (prevValue === value) {
+      // Erase the value.
+      const newBoard = [...state.board];
+      newBoard[sel] = 0;
+      const history: HistoryEntry[] = [
+        ...state.history,
+        {
+          index: sel,
+          prevValue,
+          nextValue: 0,
+          prevNotes: new Set(prevNotes),
+          nextNotes: new Set(),
+          wasGiven: false,
+        },
+      ];
+      set({ board: newBoard, history });
+      saveGame(get());
+      return;
+    }
+
+    const newBoard = [...state.board];
+    newBoard[sel] = value;
+    // Clear notes on this cell.
+    const newNotes = cloneNotes(state.notes);
+    newNotes[sel] = new Set();
+    // Also clear this number from notes of peers (sudoku convention).
+    const peersOfSel = peerIndicesFor(sel);
+    for (const p of peersOfSel) {
+      if (newNotes[p].has(value)) {
+        newNotes[p] = new Set(newNotes[p]);
+        newNotes[p].delete(value);
+      }
+    }
+
+    // Score: +10 for placing the right value.
+    const correct = value === state.solution[sel];
+    const isMistake = !correct;
+
+    const newScore = correct ? state.score + 10 : state.score;
+    const newMistakes = isMistake ? state.mistakes + 1 : state.mistakes;
+    const newLastMistake = isMistake ? sel : state.lastMistakeIndex;
+    const newLastMistakeAt = isMistake ? Date.now() : state.lastMistakeAt;
+
+    const history: HistoryEntry[] = [
+      ...state.history,
+      {
+        index: sel,
+        prevValue,
+        nextValue: value,
+        prevNotes: new Set(prevNotes),
+        nextNotes: new Set(),
+        wasGiven: false,
+      },
+    ];
+
+    // Determine new status: win, lose, or still playing.
+    let newStatus: GameStatus = "playing";
+    if (newMistakes >= state.maxMistakes) {
+      newStatus = "lost";
+    } else if (isBoardComplete(newBoard, state.solution)) {
+      newStatus = "won";
+    }
+
+    // Detect newly-completed row / column / 3x3 box for celebration animation.
+    // Only trigger on a CORRECT placement (wrong placements can't complete a unit).
+    const newCompleted = correct
+      ? newlyCompletedCells(state.board, newBoard, state.solution)
+      : new Set<number>();
+
+    set({
+      board: newBoard,
+      notes: newNotes,
+      score: newScore,
+      mistakes: newMistakes,
+      lastMistakeIndex: newLastMistake,
+      lastMistakeAt: newLastMistakeAt,
+      history,
+      status: newStatus,
+      completedAnimCells: newCompleted,
+      completedAnimAt: newCompleted.size > 0 ? Date.now() : state.completedAnimAt,
+    });
+    // Persist or clear depending on whether the game ended.
+    if (newStatus === "won" || newStatus === "lost") {
+      clearSavedGame();
+      set({ savedGamePreview: null });
+    } else {
+      saveGame(get());
+    }
+  },
+
+  erase: () => {
+    const state = get();
+    if (state.status !== "playing") return;
+    const sel = state.selected;
+    if (sel === null) return;
+    if (state.puzzle[sel] !== 0) return;
+    const prevValue = state.board[sel];
+    const prevNotes = state.notes[sel];
+    if (prevValue === 0 && prevNotes.size === 0) return;
+
+    const newBoard = [...state.board];
+    newBoard[sel] = 0;
+    const newNotes = cloneNotes(state.notes);
+    newNotes[sel] = new Set();
+    const history: HistoryEntry[] = [
+      ...state.history,
+      {
+        index: sel,
+        prevValue,
+        nextValue: 0,
+        prevNotes: new Set(prevNotes),
+        nextNotes: new Set(),
+        wasGiven: false,
+      },
+    ];
+    set({ board: newBoard, notes: newNotes, history });
+    saveGame(get());
+  },
+
+  undo: () => {
+    const state = get();
+    if (state.status !== "playing") return;
+    if (state.history.length === 0) return;
+    const history = [...state.history];
+    const last = history.pop()!;
+    const newBoard = [...state.board];
+    newBoard[last.index] = last.prevValue;
+    const newNotes = cloneNotes(state.notes);
+    newNotes[last.index] = new Set(last.prevNotes ?? []);
+    set({ board: newBoard, notes: newNotes, history });
+    saveGame(get());
+  },
+
+  useHint: () => {
+    const state = get();
+    if (state.status !== "playing") return;
+    if (state.hintsLeft <= 0) return;
+
+    // Prefer the currently selected cell if it's empty; otherwise pick a random empty cell.
+    let index: number;
+    if (
+      state.selected !== null &&
+      state.board[state.selected] === 0 &&
+      state.puzzle[state.selected] === 0 // not already a given/hinted cell
+    ) {
+      index = state.selected;
+    } else {
+      const hint = getHint(state.board, state.solution);
+      if (!hint) return;
+      index = hint.index;
+    }
+    const value = state.solution[index];
+
+    const newBoard = [...state.board];
+    newBoard[index] = value;
+    // Mark this cell as a "given" by adding it to the puzzle array.
+    // This makes it: black text, non-editable, and excluded from undo history.
+    const newPuzzle = [...state.puzzle];
+    newPuzzle[index] = value;
+    const newNotes = cloneNotes(state.notes);
+    newNotes[index] = new Set();
+    // No history entry — hinted cells are permanent and cannot be undone.
+
+    const newScore = state.score + 5; // smaller bonus for hints
+    let newStatus: GameStatus = "playing";
+    if (isBoardComplete(newBoard, state.solution)) newStatus = "won";
+
+    // Detect newly-completed row / column / 3x3 box for celebration animation.
+    const newCompleted = newlyCompletedCells(state.board, newBoard, state.solution);
+
+    set({
+      board: newBoard,
+      puzzle: newPuzzle,
+      notes: newNotes,
+      hintsLeft: state.hintsLeft - 1,
+      score: newScore,
+      lastHintIndex: index,
+      lastHintAt: Date.now(),
+      selected: index,
+      status: newStatus,
+      completedAnimCells: newCompleted,
+      completedAnimAt: newCompleted.size > 0 ? Date.now() : state.completedAnimAt,
+    });
+    if (newStatus === "won") {
+      clearSavedGame();
+      set({ savedGamePreview: null });
+    } else {
+      saveGame(get());
+    }
+  },
+
+  pause: () => {
+    if (get().status === "playing") {
+      set({ status: "paused" });
+      saveGame(get());
+    }
+  },
+  resume: () => {
+    if (get().status === "paused") {
+      set({ status: "playing" });
+      saveGame(get());
+    }
+  },
+  tick: () => {
+    if (get().status === "playing") {
+      set((s) => ({ elapsedSec: s.elapsedSec + 1 }));
+      saveGame(get());
+    }
+  },
+  reset: () => {
+    clearSavedGame();
+    set({
+      status: "idle",
+      puzzle: [...EMPTY_BOARD],
+      solution: [...EMPTY_BOARD],
+      board: [...EMPTY_BOARD],
+      notes: emptyNotes(),
+      selected: null,
+      notesMode: false,
+      hintsLeft: MAX_HINTS,
+      mistakes: 0,
+      score: 0,
+      elapsedSec: 0,
+      lastMistakeIndex: null,
+      lastMistakeAt: 0,
+      lastHintIndex: null,
+      lastHintAt: 0,
+      completedAnimCells: new Set<number>(),
+      completedAnimAt: 0,
+      history: [],
+      savedGamePreview: null,
+    });
+  },
+
+  // Alias for reset — returns to the home screen.
+  goHome: () => {
+    get().reset();
+  },
+
+  // Load a saved game from localStorage and populate savedGamePreview
+  // (for the Continue button). Does NOT auto-resume the game.
+  loadSavedGame: () => {
+    const saved = loadSavedGame();
+    if (saved && (saved.status === "playing" || saved.status === "paused")) {
+      set({ savedGamePreview: toPreview(saved) });
+    } else {
+      set({ savedGamePreview: null });
+    }
+  },
+
+  // Restore the full saved game and resume play.
+  resumeSavedGame: () => {
+    const saved = loadSavedGame();
+    if (!saved) {
+      set({ savedGamePreview: null });
+      return;
+    }
+    // Reconstruct notes from arrays.
+    const notes: CellNotes[] = saved.notes.map((arr) => new Set<number>(arr));
+    // Reconstruct history from arrays.
+    const history: HistoryEntry[] = saved.history.map((h) => ({
+      index: h.index,
+      prevValue: h.prevValue,
+      nextValue: h.nextValue,
+      prevNotes: new Set<number>(h.prevNotes ?? []),
+      nextNotes: new Set<number>(h.nextNotes ?? []),
+      wasGiven: h.wasGiven,
+    }));
+    set({
+      status: "playing", // always resume in playing state
+      difficulty: saved.difficulty,
+      puzzle: [...saved.puzzle],
+      solution: [...saved.solution],
+      board: [...saved.board],
+      notes,
+      selected: saved.selected,
+      notesMode: saved.notesMode,
+      hintsLeft: saved.hintsLeft,
+      mistakes: saved.mistakes,
+      maxMistakes: saved.maxMistakes,
+      score: saved.score,
+      elapsedSec: saved.elapsedSec,
+      lastMistakeIndex: null,
+      lastMistakeAt: 0,
+      lastHintIndex: null,
+      lastHintAt: 0,
+      completedAnimCells: new Set<number>(),
+      completedAnimAt: 0,
+      history,
+      savedGamePreview: null,
+    });
+    saveGame(get());
+  },
+}));
+
+/* ----------------------------- selectors ----------------------------- */
+
+function peerIndicesFor(index: number): number[] {
+  // Import here to avoid circular import issues at module load time.
+  // (PEERS is a const export from sudoku.ts.)
+  // We use a local copy to avoid the import.
   const r = Math.floor(index / 9);
   const c = index % 9;
   const boxR = Math.floor(r / 3) * 3;
   const boxC = Math.floor(c / 3) * 3;
   const peers: number[] = [];
   for (let i = 0; i < 9; i++) {
-    if (i !== c) peers.push(idx(r, i));
-    if (i !== r) peers.push(idx(i, c));
+    if (i !== c) peers.push(r * 9 + i);
+    if (i !== r) peers.push(i * 9 + c);
   }
   for (let i = 0; i < 3; i++) {
     for (let j = 0; j < 3; j++) {
-      const pi = idx(boxR + i, boxC + j);
+      const pi = (boxR + i) * 9 + (boxC + j);
       if (pi !== index && !peers.includes(pi)) peers.push(pi);
     }
   }
   return peers;
 }
 
-/** Pre-compute peers for every cell. */
-export const PEERS: number[][] = Array.from({ length: 81 }, (_, i) => getPeers(i));
-
-/** Check if `value` is valid at `index` given the current board. */
-export function isValidPlacement(board: Board, index: number, value: CellValue): boolean {
-  if (value === 0) return true;
-  return PEERS[index].every((p) => board[p] !== value);
+/** Selector hook: compute the conflict set for the current board. */
+export function useConflicts(): Set<number> {
+  const board = useSudokuStore((s) => s.board);
+  return computeAllConflicts(board);
 }
 
-/** Find all peers that conflict with the value at `index`. */
-export function findConflicts(board: Board, index: number, value: CellValue): number[] {
-  if (value === 0) return [];
-  return PEERS[index].filter((p) => board[p] === value);
-}
-
-/* ----------------------------- solver ----------------------------- */
-
-function findEmpty(board: Board): number {
-  for (let i = 0; i < 81; i++) if (board[i] === 0) return i;
-  return -1;
-}
-
-function shuffled<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-/** Count the number of solutions (up to `limit`). */
-export function countSolutions(board: Board, limit = 2): number {
-  const work = [...board];
-  let count = 0;
-
-  const solve = (): void => {
-    if (count >= limit) return;
-    const i = findEmpty(work);
-    if (i === -1) {
-      count++;
-      return;
-    }
-    for (let v = 1; v <= 9; v++) {
-      if (isValidPlacement(work, i, v)) {
-        work[i] = v;
-        solve();
-        work[i] = 0;
-        if (count >= limit) return;
-      }
-    }
-  };
-  solve();
-  return count;
-}
-
-/** Solve a board; returns the solved board or null if unsolvable. */
-export function solveBoard(board: Board): Board | null {
-  const work = [...board];
-  const solve = (): boolean => {
-    const i = findEmpty(work);
-    if (i === -1) return true;
-    for (let v = 1; v <= 9; v++) {
-      if (isValidPlacement(work, i, v)) {
-        work[i] = v;
-        if (solve()) return true;
-        work[i] = 0;
-      }
-    }
-    return false;
-  };
-  return solve() ? work : null;
-}
-
-/* ----------------------------- generator ----------------------------- */
-
-/** Generate a fully solved board via randomized backtracking. */
-export function generateSolvedBoard(): Board {
-  const board: Board = [...EMPTY_BOARD];
-  const fill = (idxPos: number): boolean => {
-    if (idxPos === 81) return true;
-    for (const v of shuffled([1, 2, 3, 4, 5, 6, 7, 8, 9])) {
-      if (isValidPlacement(board, idxPos, v)) {
-        board[idxPos] = v;
-        if (fill(idxPos + 1)) return true;
-        board[idxPos] = 0;
-      }
-    }
-    return false;
-  };
-  fill(0);
-  return board;
-}
-
-/**
- * Generate a Sudoku puzzle. The returned puzzle has a unique solution.
- * `clues` is the target number of pre-filled cells.
- */
-export function generatePuzzle(difficulty: Difficulty): {
-  puzzle: Board;
-  solution: Board;
-} {
-  const solution = generateSolvedBoard();
-  const puzzle = [...solution];
-  const targetClues = DIFFICULTY_CLUES[difficulty];
-  const cellsToRemove = 81 - targetClues;
-
-  // Remove cells in random order, ensuring the puzzle stays uniquely solvable.
-  const order = shuffled(Array.from({ length: 81 }, (_, i) => i));
-  let removed = 0;
-  for (const cell of order) {
-    if (removed >= cellsToRemove) break;
-    const backup = puzzle[cell];
-    if (backup === 0) continue;
-    puzzle[cell] = 0;
-
-    // For Easy/Medium, skip the uniqueness check to keep generation fast.
-    if (difficulty === "hard" || difficulty === "expert") {
-      if (countSolutions(puzzle, 2) !== 1) {
-        puzzle[cell] = backup; // revert
-        continue;
-      }
-    }
-    removed++;
-  }
-
-  return { puzzle, solution };
-}
-
-/** Returns true if the board is fully filled and matches the solution. */
-export function isBoardComplete(board: Board, solution: Board): boolean {
-  for (let i = 0; i < 81; i++) {
-    if (board[i] === 0) return false;
-    if (board[i] !== solution[i]) return false;
-  }
-  return true;
-}
-
-/** Compute current conflicts for highlighting in the UI. */
-export function computeAllConflicts(board: Board): Set<number> {
-  const conflicts = new Set<number>();
-  for (let i = 0; i < 81; i++) {
-    if (board[i] === 0) continue;
-    const peers = PEERS[i];
-    for (const p of peers) {
-      if (board[p] === board[i]) {
-        conflicts.add(i);
-        conflicts.add(p);
-      }
-    }
-  }
-  return conflicts;
-}
-
-/* ----------------------------- hints ----------------------------- */
-
-/** Returns the index of an empty cell + its correct value, or null. */
-export function getHint(board: Board, solution: Board): { index: number; value: number } | null {
-  const empties: number[] = [];
-  for (let i = 0; i < 81; i++) if (board[i] === 0) empties.push(i);
-  if (empties.length === 0) return null;
-  const index = empties[Math.floor(Math.random() * empties.length)];
-  return { index, value: solution[index] };
-}
-
-/* ----------------------------- completion ----------------------------- */
-
-/**
- * Returns the set of cell indices that belong to any fully-correct row,
- * column, or 3x3 box. A unit is "complete" when all 9 of its cells are
- * filled and match the solution.
- */
-export function getCompletedUnitCells(board: Board, solution: Board): Set<number> {
-  const result = new Set<number>();
-
-  // Helper: check if all 9 cells in the given indices are filled and correct.
-  const isUnitComplete = (indices: number[]): boolean => {
-    for (const i of indices) {
-      if (board[i] === 0 || board[i] !== solution[i]) return false;
-    }
-    return true;
-  };
-
-  // Rows
-  for (let r = 0; r < 9; r++) {
-    const indices = Array.from({ length: 9 }, (_, c) => r * 9 + c);
-    if (isUnitComplete(indices)) for (const i of indices) result.add(i);
-  }
-  // Columns
-  for (let c = 0; c < 9; c++) {
-    const indices = Array.from({ length: 9 }, (_, r) => r * 9 + c);
-    if (isUnitComplete(indices)) for (const i of indices) result.add(i);
-  }
-  // 3x3 boxes
-  for (let boxR = 0; boxR < 3; boxR++) {
-    for (let boxC = 0; boxC < 3; boxC++) {
-      const indices: number[] = [];
-      for (let i = 0; i < 3; i++) {
-        for (let j = 0; j < 3; j++) {
-          indices.push((boxR * 3 + i) * 9 + (boxC * 3 + j));
-        }
-      }
-      if (isUnitComplete(indices)) for (const i of indices) result.add(i);
-    }
-  }
-
-  return result;
+/** Format seconds as MM:SS. */
+export function formatTime(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
