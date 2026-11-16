@@ -1,19 +1,25 @@
 "use client";
 
-import { useToastManager } from "@/components/ui/toast";
+import { toast, useToastManager } from "@/components/ui/toast";
 
 function useToast() {
-  const toastManager = useToastManager();
+  const { toasts } = useToastManager();
 
   return {
-    toasts: toastManager.toasts,
-
-    toast: toastManager.add,
-
-    dismiss: toastManager.close,
-
-    update: toastManager.update,
+    toasts,
+    toast: (props: {
+      title?: React.ReactNode;
+      description?: React.ReactNode;
+      type?: "success" | "info" | "warning" | "error" | "loading";
+    }) => toast.add(props),
+    dismiss: (toastId?: string) => {
+      if (toastId) {
+        toast.close(toastId);
+      } else {
+        toast.close();
+      }
+    },
   };
 }
 
-export { useToast };
+export { useToast, toast };

@@ -224,6 +224,8 @@ export {
   ToastClose,
   ToastContent,
   ToastDescription,
+  ToastIcon,
+  ToastList,
   ToastPortal,
   ToastProvider,
   ToastTitle,
