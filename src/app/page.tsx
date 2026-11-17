@@ -1,5 +1,6 @@
 "use client";
 
+import { MotionConfig } from "framer-motion";
 import { useSudokuStore } from "@/store/sudoku-store";
 import { useGameTimer } from "@/hooks/use-game-timer";
 import { useKeyboardControls } from "@/hooks/use-keyboard-controls";
@@ -10,43 +11,42 @@ import { NumberPad } from "@/components/sudoku/number-pad";
 import { ActionBar } from "@/components/sudoku/action-bar";
 import { GameHeader } from "@/components/sudoku/game-header";
 import { PauseOverlay } from "@/components/sudoku/pause-overlay";
+import { HintBanner } from "@/components/sudoku/hint-banner";
 import { GameEndDialog } from "@/components/sudoku/game-end-dialog";
 import { DifficultySelector } from "@/components/sudoku/difficulty-selector";
-import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function Home() {
   const status = useSudokuStore((s) => s.status);
 
-  // Always mount the timer & keyboard handlers (they short-circuit when not playing).
+  // Always mounted; each short-circuits when not playing.
   useGameTimer();
   useKeyboardControls();
   useLoadSavedGame();
   useTabPause();
 
   return (
-    <main className="min-h-screen bg-[var(--sudoku-page-bg)] flex flex-col items-center justify-start py-6 px-4">
-      {/* Theme toggle — fixed top-right corner */}
-      <div className="fixed top-4 right-4 z-50">
-        <ThemeToggle />
-      </div>
-
-      {status === "idle" ? (
-        <DifficultySelector />
-      ) : (
-        <div className="w-full flex flex-col items-center gap-5 sm:gap-6 py-2">
-          <GameHeader />
-
-          <div className="relative w-full flex justify-center">
-            <SudokuBoard />
-            <PauseOverlay />
+    <MotionConfig reducedMotion="user">
+      <main className="app-shell flex flex-col items-center bg-[var(--sudoku-page-bg)]">
+        {status === "idle" ? (
+          <DifficultySelector />
+        ) : (
+          <div className="game-layout mx-auto flex w-full max-w-[30rem] flex-1 flex-col">
+            <GameHeader />
+            <div className="flex flex-1 items-center justify-center py-3">
+              <div className="board-frame relative">
+                <SudokuBoard />
+                <PauseOverlay />
+                <HintBanner />
+              </div>
+            </div>
+            <div className="flex flex-col gap-3 pb-2">
+              <ActionBar />
+              <NumberPad />
+            </div>
           </div>
-
-          <ActionBar />
-          <NumberPad />
-        </div>
-      )}
-
-      <GameEndDialog />
-    </main>
+        )}
+        <GameEndDialog />
+      </main>
+    </MotionConfig>
   );
 }

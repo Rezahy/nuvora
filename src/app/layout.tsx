@@ -1,8 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ServiceWorkerRegister } from "@/components/sw-register";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,21 +16,39 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sudoku — Play Online",
+  title: "Sudoku",
   description:
-    "A clean, fast, mobile-friendly Sudoku game built with Next.js. Four difficulty levels, notes, hints, and undo.",
-  keywords: ["Sudoku", "puzzle", "game", "Next.js", "TypeScript"],
-  authors: [{ name: "Sudoku" }],
+    "A clean, fast, mobile-friendly Sudoku game. Four difficulty levels, notes, hints and undo. Installable and playable offline.",
+  keywords: ["Sudoku", "puzzle", "game"],
+  applicationName: "Sudoku",
+  appleWebApp: {
+    capable: true,
+    title: "Sudoku",
+    statusBarStyle: "default",
+  },
+  formatDetection: { telephone: false },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
+  },
   openGraph: {
-    title: "Sudoku — Play Online",
+    title: "Sudoku",
     description: "A clean, fast, mobile-friendly Sudoku game.",
     type: "website",
   },
-  twitter: {
-    card: "summary_large_image",
-    title: "Sudoku — Play Online",
-    description: "A clean, fast, mobile-friendly Sudoku game.",
-  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f5f5f5" },
+    { media: "(prefers-color-scheme: dark)", color: "#171717" },
+  ],
 };
 
 export default function RootLayout({
@@ -39,18 +58,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
-      >
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           {children}
           <Toaster />
         </ThemeProvider>
+        <ServiceWorkerRegister />
       </body>
     </html>
   );

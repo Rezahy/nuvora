@@ -78,19 +78,19 @@
   --sidebar-ring: oklch(0.708 0 0);
 
   /* Sudoku-specific semantic colors — LIGHT */
-  --sudoku-page-bg: oklch(0.97 0 0);            /* slate-50 */
-  --sudoku-surface: oklch(1 0 0);               /* white */
-  --sudoku-surface-hover: oklch(0.97 0 0);      /* slate-50/100 */
-  --sudoku-surface-muted: oklch(0.967 0 0);     /* slate-100 — given cells */
-  --sudoku-border-thin: oklch(0.922 0 0);       /* slate-200 */
-  --sudoku-border-thick: oklch(0.205 0 0);      /* slate-900 */
+  --sudoku-page-bg: #f5f5f5;
+  --sudoku-surface: #ffffff;
+  --sudoku-surface-hover: #f4f6fa;
+  --sudoku-surface-muted: #eaeef4;              /* action buttons */
+  --sudoku-border-thin: #bec6d4;
+  --sudoku-border-thick: #344861;
 
-  --sudoku-selected-bg: oklch(0.809 0.075 251); /* blue-300 */
-  --sudoku-peer-bg: oklch(0.971 0.014 254);     /* blue-50 */
-  --sudoku-same-value-bg: oklch(0.932 0.032 255); /* blue-100 */
+  --sudoku-selected-bg: #bbdefb;
+  --sudoku-peer-bg: #e2ebf3;
+  --sudoku-same-value-bg: #c3d7ea;
 
-  --sudoku-num-user: oklch(0.546 0.215 262);    /* blue-600 */
-  --sudoku-num-given: oklch(0.205 0 0);         /* slate-900 */
+  --sudoku-num-user: #325aaf;
+  --sudoku-num-given: #344861;
   --sudoku-num-accent: oklch(0.546 0.215 262);  /* blue-500/600 */
   --sudoku-label: oklch(0.556 0 0);             /* slate-500/400 labels */
   --sudoku-text: oklch(0.279 0 0);              /* slate-800 */
@@ -101,7 +101,7 @@
   --sudoku-wrong-text: oklch(0.577 0.245 27);   /* red-600 */
 
   --sudoku-hint-bg: oklch(0.899 0.075 162);     /* emerald-200 */
-  --sudoku-complete-bg: oklch(0.899 0.075 162); /* emerald-200 */
+  --sudoku-complete-bg: #a9cdf5;                /* completion ripple */
 
   --sudoku-primary-btn: oklch(0.546 0.215 262); /* blue-500 */
   --sudoku-primary-btn-hover: oklch(0.488 0.217 264); /* blue-600 */
@@ -141,7 +141,7 @@
   --sidebar-ring: oklch(0.556 0 0);
 
   /* Sudoku-specific semantic colors — DARK */
-  --sudoku-page-bg: oklch(0.21 0 0);              /* slate-950-ish */
+  --sudoku-page-bg: #171717;
   --sudoku-surface: oklch(0.27 0 0);              /* slate-900-ish */
   --sudoku-surface-hover: oklch(0.32 0 0);        /* slate-800-ish */
   --sudoku-surface-muted: oklch(0.32 0 0);        /* slate-800 — given cells */
@@ -164,7 +164,7 @@
   --sudoku-wrong-text: oklch(0.7 0.19 22);        /* red-400 */
 
   --sudoku-hint-bg: oklch(0.32 0.08 162);         /* emerald-800 */
-  --sudoku-complete-bg: oklch(0.32 0.08 162);     /* emerald-800 */
+  --sudoku-complete-bg: oklch(0.42 0.11 255);     /* completion ripple */
 
   --sudoku-primary-btn: oklch(0.55 0.18 262);     /* blue-600 */
   --sudoku-primary-btn-hover: oklch(0.5 0.18 264);/* blue-700 */
@@ -179,14 +179,43 @@
   }
 }
 
-@keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  20% { transform: translateX(-3px); }
-  40% { transform: translateX(3px); }
-  60% { transform: translateX(-2px); }
-  80% { transform: translateX(2px); }
+/* ---------- App shell: behaves like a native mobile app ---------- */
+
+html,
+body {
+  background: var(--sudoku-page-bg);
+  overscroll-behavior: none; /* no pull-to-refresh / rubber-banding mid-game */
 }
 
-.animate-shake {
-  animation: shake 0.4s ease-in-out;
+body {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation; /* no double-tap zoom delay */
+}
+
+.app-shell {
+  min-height: 100dvh;
+  padding: max(env(safe-area-inset-top), 12px) max(env(safe-area-inset-right), 16px)
+    max(env(safe-area-inset-bottom), 12px) max(env(safe-area-inset-left), 16px);
+}
+
+.game-layout {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The board is as large as the width allows, but shrinks on short screens so
+   the header, actions and number pad always fit without scrolling. */
+.board-frame {
+  width: min(100%, calc(100dvh - 290px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+  min-width: 260px;
+}
+
+.sudoku-board {
+  container-type: inline-size;
+  --cell-font: 7cqw;
+  --note-font: 2.5cqw;
+}
+
+.game-layout {
+  --pad-font: clamp(1.75rem, 8.5vw, 2.4rem);
 }

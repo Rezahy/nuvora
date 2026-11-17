@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { Play, RotateCcw, Home } from "lucide-react";
-import { useSudokuStore } from "@/store/sudoku-store";
+import { useSudokuStore, formatTime } from "@/store/sudoku-store";
 
 export function PauseOverlay() {
   const status = useSudokuStore((s) => s.status);
@@ -10,6 +10,7 @@ export function PauseOverlay() {
   const startGame = useSudokuStore((s) => s.startGame);
   const goHome = useSudokuStore((s) => s.goHome);
   const difficulty = useSudokuStore((s) => s.difficulty);
+  const elapsedSec = useSudokuStore((s) => s.elapsedSec);
 
   return (
     <AnimatePresence>
@@ -19,60 +20,38 @@ export function PauseOverlay() {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="absolute inset-0 z-20 flex items-center justify-center bg-[var(--sudoku-surface)]/80 backdrop-blur-sm rounded-xl"
+          className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-[var(--sudoku-surface)]/90 backdrop-blur-md"
         >
-          <div className="flex flex-col items-center gap-5">
-            <motion.h2
-              initial={{ y: -10, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.05 }}
-              className="text-2xl font-bold text-[var(--sudoku-text)]"
-            >
-              Paused
-            </motion.h2>
-
+          <div className="flex flex-col items-center gap-4">
+            <h2 className="text-2xl font-bold text-[var(--sudoku-text)]">Paused</h2>
+            <p className="-mt-2 text-sm tabular-nums text-[var(--sudoku-label)]">{formatTime(elapsedSec)}</p>
             <motion.button
               type="button"
               onClick={resume}
               whileTap={{ scale: 0.92 }}
-              whileHover={{ scale: 1.05 }}
-              initial={{ y: 10, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.1 }}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--sudoku-primary-btn)] text-white font-semibold shadow-md shadow-blue-500/20"
+              className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--sudoku-primary-btn)] text-white shadow-lg shadow-blue-500/30"
+              aria-label="Resume"
+              autoFocus
             >
-              <Play className="w-5 h-5" fill="currentColor" />
-              Resume
+              <Play className="ml-1 h-7 w-7" fill="currentColor" />
             </motion.button>
-
-            <div className="flex items-center gap-2 mt-1">
-              <motion.button
+            <div className="mt-1 flex items-center gap-2">
+              <button
                 type="button"
                 onClick={() => startGame(difficulty)}
-                whileTap={{ scale: 0.92 }}
-                whileHover={{ scale: 1.05 }}
-                initial={{ y: 10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.15 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-[var(--sudoku-text)] hover:bg-[var(--sudoku-surface-muted)] font-medium"
+                className="flex items-center gap-2 rounded-xl px-4 py-2 font-medium text-[var(--sudoku-text)] hover:bg-[var(--sudoku-surface-muted)]"
               >
-                <RotateCcw className="w-4 h-4" />
+                <RotateCcw className="h-4 w-4" />
                 New game
-              </motion.button>
-
-              <motion.button
+              </button>
+              <button
                 type="button"
                 onClick={goHome}
-                whileTap={{ scale: 0.92 }}
-                whileHover={{ scale: 1.05 }}
-                initial={{ y: 10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.2 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-[var(--sudoku-text)] hover:bg-[var(--sudoku-surface-muted)] font-medium"
+                className="flex items-center gap-2 rounded-xl px-4 py-2 font-medium text-[var(--sudoku-text)] hover:bg-[var(--sudoku-surface-muted)]"
               >
-                <Home className="w-4 h-4" />
+                <Home className="h-4 w-4" />
                 Home
-              </motion.button>
+              </button>
             </div>
           </div>
         </motion.div>

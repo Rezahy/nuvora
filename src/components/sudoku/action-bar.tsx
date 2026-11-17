@@ -1,9 +1,19 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Undo2, Eraser, Pencil, Lightbulb } from "lucide-react";
+import { Undo2, Eraser, Pencil, Lightbulb, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useSudokuStore } from "@/store/sudoku-store";
+import { useSudokuStore, isLockedCell } from "@/store/sudoku-store";
+
+interface Action {
+  key: string;
+  label: string;
+  icon: LucideIcon;
+  onClick: () => void;
+  disabled: boolean;
+  active?: boolean;
+  badge?: React.ReactNode;
+}
 
 export function ActionBar() {
   const undo = useSudokuStore((s) => s.undo);
@@ -13,50 +23,38 @@ export function ActionBar() {
   const notesMode = useSudokuStore((s) => s.notesMode);
   const hintsLeft = useSudokuStore((s) => s.hintsLeft);
   const historyLen = useSudokuStore((s) => s.history.length);
-  const selected = useSudokuStore((s) => s.selected);
-  const board = useSudokuStore((s) => s.board);
-  const puzzle = useSudokuStore((s) => s.puzzle);
-  const notes = useSudokuStore((s) => s.notes);
   const status = useSudokuStore((s) => s.status);
+  const canErase = useSudokuStore(
+    (s) =>
+      s.selected !== null &&
+      !isLockedCell(s, s.selected) &&
+      (s.board[s.selected] !== 0 || s.notes[s.selected].size > 0),
+  );
 
   const disabled = status !== "playing";
 
-  // Whether erase has anything to do.
-  const canErase =
-    selected !== null &&
-    puzzle[selected] === 0 &&
-    (board[selected] !== 0 || notes[selected].size > 0);
-
-  const actions = [
-    {
-      key: "undo",
-      label: "Undo",
-      icon: Undo2,
-      onClick: undo,
-      disabled: disabled || historyLen === 0,
-      badge: null as number | null,
-      badgeColor: "",
-      active: false,
-    },
-    {
-      key: "erase",
-      label: "Erase",
-      icon: Eraser,
-      onClick: erase,
-      disabled: disabled || !canErase,
-      badge: null,
-      badgeColor: "",
-      active: false,
-    },
+  const actions: Action[] = [
+    { key: "undo", label: "Undo", icon: Undo2, onClick: undo, disabled: disabled || historyLen === 0 },
+    { key: "erase", label: "Erase", icon: Eraser, onClick: erase, disabled: disabled || !canErase },
     {
       key: "notes",
       label: "Notes",
       icon: Pencil,
       onClick: toggleNotesMode,
       disabled,
-      badge: notesMode ? null : null, // we'll render "ON" text instead when active
-      badgeColor: "bg-[var(--sudoku-primary-btn)] text-white",
       active: notesMode,
+      badge: (
+        <span
+          className={cn(
+            "rounded-full px-1.5 py-[2px] text-[9px] font-bold uppercase leading-none",
+            notesMode
+              ? "bg-[var(--sudoku-primary-btn)] text-white"
+              : "bg-[var(--sudoku-text-muted)] text-[var(--sudoku-surface)]",
+          )}
+        >
+          {notesMode ? "On" : "Off"}
+        </span>
+      ),
     },
     {
       key: "hint",
@@ -64,81 +62,52 @@ export function ActionBar() {
       icon: Lightbulb,
       onClick: useHint,
       disabled: disabled || hintsLeft <= 0,
-      badge: hintsLeft,
-      badgeColor: "bg-[var(--sudoku-primary-btn)] text-white",
-      active: false,
+      badge: (
+        <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sudoku-primary-btn)] px-1 text-[10px] font-bold leading-none text-white">
+          {hintsLeft}
+        </span>
+      ),
     },
   ];
 
   return (
-    <div className="w-full max-w-[min(92vw,30rem)] mx-auto">
-      <div className="grid grid-cols-4 gap-2 sm:gap-3">
-        {actions.map((a) => {
-          const Icon = a.icon;
-          return (
-            <motion.button
-              key={a.key}
-              type="button"
-              onClick={a.onClick}
-              disabled={a.disabled}
-              whileTap={{ scale: 0.92 }}
-              whileHover={{ scale: a.disabled ? 1 : 1.03 }}
+    <div className="grid w-full grid-cols-4">
+      {actions.map((a) => {
+        const Icon = a.icon;
+        return (
+          <motion.button
+            key={a.key}
+            type="button"
+            onClick={a.onClick}
+            disabled={a.disabled}
+            whileTap={a.disabled ? undefined : { scale: 0.88 }}
+            className="group flex flex-col items-center gap-1 py-1 disabled:cursor-not-allowed"
+            aria-label={a.key === "hint" ? `Hint, ${hintsLeft} left` : a.label}
+            aria-pressed={a.key === "notes" ? notesMode : undefined}
+          >
+            <span
               className={cn(
-                "relative flex flex-col items-center justify-center gap-1",
-                "py-2.5 sm:py-3 rounded-lg sm:rounded-xl",
-                "bg-[var(--sudoku-surface)] border border-[var(--sudoku-border-thin)]",
-                "transition-colors duration-100",
-                a.active && "bg-[var(--sudoku-peer-bg)] border-[var(--sudoku-num-accent)]",
-                "hover:bg-[var(--sudoku-surface-hover)]",
-                "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[var(--sudoku-surface)]",
+                "relative flex h-12 w-12 items-center justify-center rounded-full transition-colors",
+                a.active
+                  ? "bg-[var(--sudoku-same-value-bg)] text-[var(--sudoku-num-accent)]"
+                  : "bg-[var(--sudoku-surface-muted)] text-[var(--sudoku-label)] group-hover:bg-[var(--sudoku-peer-bg)]",
+                "group-disabled:opacity-40",
               )}
-              aria-label={a.label}
             >
-              <div className="relative">
-                <Icon
-                  className={cn(
-                    "w-5 h-5 sm:w-6 sm:h-6",
-                    a.active ? "text-[var(--sudoku-num-accent)]" : "text-[var(--sudoku-text)]",
-                  )}
-                  strokeWidth={2}
-                />
-                {a.badge !== null && a.badge !== undefined && (
-                  <span
-                    className={cn(
-                      "absolute -top-2 -right-2 min-w-[16px] h-[16px] px-1",
-                      "flex items-center justify-center",
-                      "rounded-full text-[10px] font-bold leading-none",
-                      a.badgeColor || "bg-[var(--sudoku-text-muted)] text-white",
-                    )}
-                  >
-                    {a.badge}
-                  </span>
-                )}
-                {a.key === "notes" && a.active && (
-                  <span
-                    className={cn(
-                      "absolute -top-2 -right-2 px-1 h-[16px]",
-                      "flex items-center justify-center",
-                      "rounded-full text-[9px] font-bold leading-none uppercase",
-                      "bg-[var(--sudoku-primary-btn)] text-white",
-                    )}
-                  >
-                    ON
-                  </span>
-                )}
-              </div>
-              <span
-                className={cn(
-                  "text-xs sm:text-sm font-medium",
-                  a.active ? "text-[var(--sudoku-num-accent)]" : "text-[var(--sudoku-text)]",
-                )}
-              >
-                {a.label}
-              </span>
-            </motion.button>
-          );
-        })}
-      </div>
+              <Icon className="h-[22px] w-[22px]" strokeWidth={2} />
+              {a.badge && <span className="absolute -right-1.5 -top-1">{a.badge}</span>}
+            </span>
+            <span
+              className={cn(
+                "text-xs font-medium group-disabled:opacity-40",
+                a.active ? "text-[var(--sudoku-num-accent)]" : "text-[var(--sudoku-label)]",
+              )}
+            >
+              {a.label}
+            </span>
+          </motion.button>
+        );
+      })}
     </div>
   );
 }

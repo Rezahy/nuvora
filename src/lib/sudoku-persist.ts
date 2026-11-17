@@ -1,7 +1,7 @@
 /**
  * Persistence layer for the Sudoku game.
  * Saves/restores an in-progress game to localStorage so the user can
- * continue after a page refresh.
+ * continue after a page refresh or after leaving to the home screen.
  */
 
 import type { Board, Difficulty } from "./sudoku";
@@ -40,6 +40,7 @@ interface SerializedHistoryEntry {
   nextValue: number;
   prevNotes: number[];
   nextNotes: number[];
+  peerNotesRemoved?: number[];
   wasGiven: boolean;
 }
 
@@ -69,7 +70,6 @@ function isBrowser(): boolean {
 export function saveGame(state: PersistAbleState): void {
   if (!isBrowser()) return;
 
-  // Don't save finished or idle games.
   if (state.status !== "playing" && state.status !== "paused") {
     clearSavedGame();
     return;
@@ -95,6 +95,7 @@ export function saveGame(state: PersistAbleState): void {
       nextValue: h.nextValue,
       prevNotes: Array.from(h.prevNotes ?? []),
       nextNotes: Array.from(h.nextNotes ?? []),
+      peerNotesRemoved: h.peerNotesRemoved,
       wasGiven: h.wasGiven,
     })),
   };
@@ -113,12 +114,15 @@ export function loadSavedGame(): SavedGame | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SavedGame;
-    // Basic validation.
+    const okBoard = (b: unknown) => Array.isArray(b) && b.length === 81;
     if (
       !parsed ||
       typeof parsed.status !== "string" ||
-      !Array.isArray(parsed.puzzle) ||
-      parsed.puzzle.length !== 81
+      !okBoard(parsed.puzzle) ||
+      !okBoard(parsed.solution) ||
+      !okBoard(parsed.board) ||
+      !Array.isArray(parsed.notes) ||
+      !Array.isArray(parsed.history)
     ) {
       return null;
     }

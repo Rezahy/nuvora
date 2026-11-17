@@ -1,202 +1,176 @@
-/* eslint-disable react-hooks/set-state-in-effect */
-/* eslint-disable react-hooks/purity */
 "use client";
 
 import { motion } from "framer-motion";
-import { memo, useEffect, useState } from "react";
+import { memo, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { useSudokuStore } from "@/store/sudoku-store";
-import { computeAllConflicts } from "@/lib/sudoku";
+import { computeAllConflicts, isPeer } from "@/lib/sudoku";
+
+/** Seconds between ripple steps of the completion wave. */
+const WAVE_STEP = 0.05;
+const NOTE_DIGITS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 interface SudokuCellProps {
   index: number;
   isConflict: boolean;
 }
 
-function SudokuCellImpl({ index }: SudokuCellProps) {
+function SudokuCellImpl({ index, isConflict }: SudokuCellProps) {
   const row = Math.floor(index / 9);
   const col = index % 9;
 
+  // Narrow selectors: each cell only re-renders when something it shows changes.
   const value = useSudokuStore((s) => s.board[index]);
-  const givenValue = useSudokuStore((s) => s.puzzle[index]);
-  const solutionValue = useSudokuStore((s) => s.solution[index]);
+  const isGiven = useSudokuStore((s) => s.puzzle[index] !== 0);
+  const isWrong = useSudokuStore((s) => s.board[index] !== 0 && s.board[index] !== s.solution[index]);
   const notes = useSudokuStore((s) => s.notes[index]);
-  const selected = useSudokuStore((s) => s.selected);
+  const isSelected = useSudokuStore((s) => s.selected === index);
+  const inSameUnit = useSudokuStore((s) => s.selected !== null && s.selected !== index && isPeer(s.selected, index));
+  const selectedValue = useSudokuStore((s) => (s.selected === null ? 0 : s.board[s.selected]));
+  const mistakeAt = useSudokuStore((s) => (s.lastMistakeIndex === index ? s.lastMistakeAt : 0));
+  const hintAt = useSudokuStore((s) => (s.lastHintIndex === index ? s.lastHintAt : 0));
+  const waveDelay = useSudokuStore((s) => s.completion.delays[index]);
+  const waveAt = useSudokuStore((s) => (s.completion.delays[index] >= 0 ? s.completion.at : 0));
   const selectCell = useSudokuStore((s) => s.selectCell);
-  const lastMistakeIndex = useSudokuStore((s) => s.lastMistakeIndex);
-  const lastMistakeAt = useSudokuStore((s) => s.lastMistakeAt);
-  const lastHintIndex = useSudokuStore((s) => s.lastHintIndex);
-  const lastHintAt = useSudokuStore((s) => s.lastHintAt);
-  const completedAnimCells = useSudokuStore((s) => s.completedAnimCells);
-  const completedAnimAt = useSudokuStore((s) => s.completedAnimAt);
 
-  const isGiven = givenValue !== 0;
-  const isSelected = selected === index;
+  const sameValue = !isSelected && value !== 0 && value === selectedValue;
 
-  // Persistent wrong-entry check: user-entered value that doesn't match the solution.
-  // Stays red until the user erases or corrects it.
-  const isWrong = !isGiven && value !== 0 && value !== solutionValue;
-
-  // Same row / col / box as selected.
-  const inSameUnit =
-    selected !== null &&
-    selected !== index &&
-    (Math.floor(selected / 9) === row ||
-      selected % 9 === col ||
-      (Math.floor(Math.floor(selected / 9) / 3) === Math.floor(row / 3) &&
-        Math.floor(Math.floor(selected % 9) / 3) === Math.floor(col / 3)));
-
-  // Same value as selected.
-  const board = useSudokuStore.getState().board;
-  const selectedValue = selected !== null ? board[selected] : 0;
-  const sameValueAsSelected =
-    selected !== null && value !== 0 && selectedValue !== 0 && value === selectedValue;
-
-  // Recent mistake (within last 1s) — drives the shake animation only.
-  const isRecentMistake =
-    lastMistakeIndex === index && Date.now() - lastMistakeAt < 1000;
-  const isRecentHint = lastHintIndex === index && Date.now() - lastHintAt < 1200;
-
-  // Completion celebration: when `completedAnimAt` changes and this cell is in
-  // the completed set, briefly enter a "celebrating" state for ~900ms.
-  const [isCelebrating, setIsCelebrating] = useState(false);
-  useEffect(() => {
-    if (completedAnimCells.has(index) && completedAnimAt > 0) {
-      setIsCelebrating(true);
-      const t = setTimeout(() => setIsCelebrating(false), 900);
-      return () => clearTimeout(t);
-    }
-  }, [completedAnimAt, completedAnimCells, index]);
-
-  // Borders: thick on the right & bottom of every 3rd column/row.
-  const borderClasses = cn(
-    "border-r border-b border-[var(--sudoku-border-thin)]",
-    col === 0 && "border-l-2 border-l-[var(--sudoku-border-thick)]",
-    (col + 1) % 3 === 0 && col !== 8 && "border-r-2 border-r-[var(--sudoku-border-thick)]",
-    row === 0 && "border-t-2 border-t-[var(--sudoku-border-thick)]",
-    (row + 1) % 3 === 0 && row !== 8 && "border-b-2 border-b-[var(--sudoku-border-thick)]",
-    col === 8 && "border-r-2 border-r-[var(--sudoku-border-thick)]",
-    row === 8 && "border-b-2 border-b-[var(--sudoku-border-thick)]",
-  );
-
-  // Background state — wrong entries get a persistent red tint (overrides peer/value highlights, but not selection).
-  // Celebration takes priority (green pulse) for the ~900ms it's active.
-  const bg = cn(
-    isCelebrating
-      ? "bg-[var(--sudoku-complete-bg)]"
-      : isSelected
-        ? isWrong
-          ? "bg-[var(--sudoku-wrong-bg-selected)]"
-          : "bg-[var(--sudoku-selected-bg)]"
-        : isRecentMistake
-          ? "bg-[var(--sudoku-wrong-bg-selected)]"
-          : isRecentHint
-            ? "bg-[var(--sudoku-hint-bg)]"
-            : isWrong
-              ? "bg-[var(--sudoku-wrong-bg)]"
-              : sameValueAsSelected
-                ? "bg-[var(--sudoku-same-value-bg)]"
-                : inSameUnit
-                  ? "bg-[var(--sudoku-peer-bg)]"
-                  : isGiven
-                    ? "bg-[var(--sudoku-surface-muted)]"
-                    : "bg-[var(--sudoku-surface)]",
-  );
-
-  const handleClick = () => selectCell(index);
+  const bg = isSelected
+    ? isWrong
+      ? "bg-[var(--sudoku-wrong-bg-selected)]"
+      : "bg-[var(--sudoku-selected-bg)]"
+    : isWrong || (isConflict && sameValue)
+      ? "bg-[var(--sudoku-wrong-bg)]"
+      : sameValue
+        ? "bg-[var(--sudoku-same-value-bg)]"
+        : inSameUnit
+          ? "bg-[var(--sudoku-peer-bg)]"
+          : "bg-[var(--sudoku-surface)]";
 
   return (
-    <motion.button
+    <button
       type="button"
-      onClick={handleClick}
-      animate={
-        isCelebrating
-          ? { scale: [1, 1.12, 1] }
-          : { scale: 1 }
-      }
-      transition={
-        isCelebrating
-          ? { duration: 0.6, ease: "easeInOut", times: [0, 0.5, 1] }
-          : { duration: 0.1 }
-      }
+      onPointerDown={(e) => {
+        // Select on press (not release) so the board feels instant on touch.
+        if (e.button === 0) selectCell(index);
+      }}
+      onClick={() => selectCell(index)}
       className={cn(
-        "relative flex aspect-square items-center justify-center select-none",
-        "transition-colors duration-100",
-        borderClasses,
+        "relative flex aspect-square items-center justify-center overflow-hidden select-none",
+        "transition-colors duration-150 outline-none",
         bg,
-        isRecentMistake && "animate-shake",
       )}
-      whileTap={{ scale: 0.95 }}
-      aria-label={`Cell row ${row + 1}, column ${col + 1}${
-        value ? `, value ${value}` : ", empty"
-      }`}
+      role="gridcell"
+      aria-selected={isSelected}
+      aria-label={`Row ${row + 1}, column ${col + 1}, ${value ? value : "empty"}${isWrong ? ", incorrect" : ""}`}
     >
+      {/* Completion ripple. Keyed by the event time so every completion replays,
+          and it only ever runs once: it can't get stuck on. */}
+      {waveAt > 0 && (
+        <motion.span
+          key={`wave-${waveAt}`}
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-[var(--sudoku-complete-bg)]"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: [0, 1, 0] }}
+          transition={{ duration: 0.7, delay: waveDelay * WAVE_STEP, times: [0, 0.3, 1], ease: "easeOut" }}
+        />
+      )}
+      {hintAt > 0 && (
+        <motion.span
+          key={`hint-${hintAt}`}
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-[var(--sudoku-hint-bg)]"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: [0, 1, 1, 0] }}
+          transition={{ duration: 1.4, times: [0, 0.15, 0.6, 1] }}
+        />
+      )}
+
       {value !== 0 ? (
         <motion.span
-          key={`v-${value}`}
-          initial={{ scale: 0.5, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.15 }}
-          className={cn(
-            "text-2xl sm:text-3xl font-bold leading-none",
-            isGiven
-              ? "text-[var(--sudoku-num-given)]"
-              : isWrong
-                ? "text-[var(--sudoku-wrong-text)]"
-                : "text-[var(--sudoku-num-user)]",
-          )}
+          key={`bounce-${waveAt}`}
+          className="relative block"
+          animate={waveAt > 0 ? { scale: [1, 1.3, 1] } : undefined}
+          transition={{ duration: 0.45, delay: waveDelay * WAVE_STEP + 0.05, ease: "easeOut" }}
         >
-          {value}
+          <motion.span
+            key={`shake-${mistakeAt}`}
+            className="block"
+            animate={mistakeAt > 0 ? { x: [0, -5, 5, -4, 4, -2, 0] } : undefined}
+            transition={{ duration: 0.4 }}
+          >
+            <motion.span
+              key={`v-${value}`}
+              className={cn(
+                "block font-normal leading-none tabular-nums text-[length:var(--cell-font)]",
+                isGiven
+                  ? "text-[var(--sudoku-num-given)]"
+                  : isWrong
+                    ? "text-[var(--sudoku-wrong-text)]"
+                    : "text-[var(--sudoku-num-user)]",
+              )}
+              initial={isGiven ? false : { scale: 0.4, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: "spring", stiffness: 500, damping: 25 }}
+            >
+              {value}
+            </motion.span>
+          </motion.span>
         </motion.span>
       ) : notes.size > 0 ? (
-        <div className="grid w-full h-full grid-cols-3 grid-rows-3 p-0.5">
-          {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => (
+        <span className="grid h-full w-full grid-cols-3 grid-rows-3 p-[6%]">
+          {NOTE_DIGITS.map((n) => (
             <span
               key={n}
               className={cn(
-                "flex items-center justify-center text-[9px] sm:text-[11px] leading-none text-[var(--sudoku-label)]",
-                notes.has(n) ? "opacity-100" : "opacity-0",
+                "flex items-center justify-center leading-none text-[length:var(--note-font)]",
+                !notes.has(n) && "invisible",
+                n === selectedValue
+                  ? "rounded-sm bg-[var(--sudoku-num-accent)] font-bold text-white"
+                  : "text-[var(--sudoku-label)]",
               )}
             >
               {n}
             </span>
           ))}
-        </div>
+        </span>
       ) : null}
-    </motion.button>
+    </button>
   );
 }
 
 const SudokuCell = memo(SudokuCellImpl);
 SudokuCell.displayName = "SudokuCell";
 
+/** Box b, position k inside the box → board index. */
+const cellIndex = (b: number, k: number) =>
+  (Math.floor(b / 3) * 3 + Math.floor(k / 3)) * 9 + (b % 3) * 3 + (k % 3);
+
 export function SudokuBoard() {
   const board = useSudokuStore((s) => s.board);
   const status = useSudokuStore((s) => s.status);
-
-  // Recompute conflicts whenever board changes.
-  const conflicts = computeAllConflicts(board);
-
-  // If game is not playing, disable interactions visually.
+  const conflicts = useMemo(() => computeAllConflicts(board), [board]);
   const interactive = status === "playing";
 
   return (
     <div
       className={cn(
-        "w-full max-w-[min(92vw,30rem)] mx-auto rounded-lg overflow-hidden bg-[var(--sudoku-surface)]",
-        "shadow-[0_4px_24px_-8px_rgba(15,23,42,0.15)]",
+        "sudoku-board w-full aspect-square rounded-lg bg-[var(--sudoku-border-thick)] p-[2px]",
+        "shadow-[0_6px_28px_-10px_rgba(15,23,42,0.25)]",
         !interactive && "pointer-events-none",
       )}
       role="grid"
       aria-label="Sudoku board"
     >
-      <div className="grid grid-cols-9 grid-rows-9">
-        {Array.from({ length: 81 }, (_, i) => (
-          <SudokuCell
-            key={i}
-            index={i}
-            isConflict={conflicts.has(i)}
-          />
+      <div className="grid h-full w-full grid-cols-3 grid-rows-3 gap-[2px] overflow-hidden rounded-[6px]">
+        {Array.from({ length: 9 }, (_, b) => (
+          <div key={b} className="grid grid-cols-3 grid-rows-3 gap-px bg-[var(--sudoku-border-thin)]">
+            {Array.from({ length: 9 }, (_, k) => {
+              const i = cellIndex(b, k);
+              return <SudokuCell key={i} index={i} isConflict={conflicts.has(i)} />;
+            })}
+          </div>
         ))}
       </div>
     </div>
